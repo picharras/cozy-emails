@@ -1,9 +1,80 @@
 request = require 'superagent'
 _       = require 'underscore'
 
-AccountTranslator = require './translators/account_translator'
+{FlagsConstants} = require '../constants/app_constants'
 
-SettingsStore = require '../stores/settings_store'
+discovery2Fields = (provider) ->
+    infos = {}
+
+    # Set values depending on given providers.
+    for server in provider
+
+        if server.type is 'imap' and not infos.imapServer?
+            infos.imapServer = server.hostname
+            infos.imapPort = server.port
+
+            if server.socketType is 'SSL'
+                infos.imapSSL = true
+                infos.imapTLS = false
+
+            else if server.socketType is 'STARTTLS'
+                infos.imapSSL = false
+                infos.imapTLS = true
+
+            else if server.socketType is 'plain'
+                infos.imapSSL = false
+                infos.imapTLS = false
+
+        if server.type is 'smtp' and not infos.smtpServer?
+            infos.smtpServer = server.hostname
+            infos.smtpPort = server.port
+
+            if server.socketType is 'SSL'
+                infos.smtpSSL = true
+                infos.smtpTLS = false
+
+            else if server.socketType is 'STARTTLS'
+                infos.smtpSSL = false
+                infos.smtpTLS = true
+
+            else if server.socketType is 'plain'
+                infos.smtpSSL = false
+                infos.smtpTLS = false
+
+    # Set default values if providers didn't give required infos.
+
+    unless infos.imapServer?
+        infos.imapServer = ''
+        infos.imapPort   = '993'
+
+    unless infos.smtpServer?
+        infos.smtpServer = ''
+        infos.smtpPort   = '465'
+
+    unless infos.imapSSL
+        switch infos.imapPort
+            when '993'
+                infos.imapSSL = true
+                infos.imapTLS = false
+            else
+                infos.imapSSL = false
+                infos.imapTLS = false
+
+    unless infos.smtpSSL
+        switch infos.smtpPort
+            when '465'
+                infos.smtpSSL = true
+                infos.smtpTLS = false
+            when '587'
+                infos.smtpSSL = false
+                infos.smtpTLS = true
+            else
+                infos.smtpSSL = false
+                infos.smtpTLS = false
+
+    infos.isGmail = infos.imapServer is 'imap.googlemail.com'
+
+    return infos
 
 
 handleResponse = (callback, details...) ->
@@ -38,21 +109,16 @@ module.exports =
         .send settings
         .end handleResponse callback, 'changeSettings', settings
 
-    fetchMessage: (emailID, callback) ->
-        request.get "message/#{emailID}"
-        .set 'Accept', 'application/json'
-        .end handleResponse callback, 'fetchMessage', emailID
-
-    fetchConversation: (conversationID, callback) ->
-        request.get "messages/batchFetch?conversationID=#{conversationID}"
+    fetchConversation: ({messageID, conversationID}, callback) ->
+        if conversationID
+            url = "messages/batchFetch?conversationID=#{conversationID}"
+        else
+            url = "messages/batchFetch?messageID=#{messageID}"
+        request.get url
         .set 'Accept', 'application/json'
         .end (err, res) ->
-            _cb = handleResponse(callback, 'fetchConversation', conversationID)
-            if res.ok
-                res.body.conversationLengths = {}
-                res.body.conversationLengths[conversationID] = res.body.length
-            _cb(err, res)
-
+            _cb = handleResponse callback, 'fetchConversation', {messageID, conversationID}
+            _cb err, res
 
     fetchMessagesByFolder: (url, callback) ->
         request.get url
@@ -105,22 +171,32 @@ module.exports =
         .send target
         .end handleResponse callback, "batchFetch"
 
-    batchAddFlag: (target, flag, callback) ->
-        body = _.extend {flag}, target
-        request.put "messages/batchAddFlag"
-        .send body
-        .end handleResponse callback, "batchAddFlag"
+    batchFlag: ({target, action}, callback) ->
+        switch action
+            when FlagsConstants.SEEN
+                operation = 'batchAddFlag'
+                flag = FlagsConstants.SEEN
+            when FlagsConstants.FLAGGED
+                operation = 'batchAddFlag'
+                flag = FlagsConstants.FLAGGED
+            when FlagsConstants.UNSEEN
+                operation = 'batchRemoveFlag'
+                flag = FlagsConstants.SEEN
+            when FlagsConstants.NOFLAG
+                operation = 'batchRemoveFlag'
+                flag = FlagsConstants.FLAGGED
+            else
+                throw new Error "Wrong usage : unrecognized FlagsConstants"
 
-    batchRemoveFlag: (target, flag, callback) ->
         body = _.extend {flag}, target
-        request.put "messages/batchRemoveFlag"
+        request.put "messages/#{operation}"
         .send body
-        .end handleResponse callback, "batchRemoveFlag"
+        .end handleResponse callback, operation
 
     batchDelete: (target, callback) ->
         body = _.extend {}, target
         request.put "messages/batchTrash"
-        .send target
+        .send body
         .end handleResponse callback, "batchDelete"
 
     batchMove: (target, from, to, callback) ->
@@ -159,10 +235,14 @@ module.exports =
         .end handleResponse callback, "removeAccount"
 
     accountDiscover: (domain, callback) ->
+        _callback = (error, provider) =>
+            unless error
+                infos = discovery2Fields(provider)
+            callback error, provider, infos
 
         request.get "provider/#{domain}"
         .set 'Accept', 'application/json'
-        .end handleResponse callback, "accountDiscover"
+        .end handleResponse _callback, "accountDiscover"
 
     search: (url, callback) ->
         request.get url
