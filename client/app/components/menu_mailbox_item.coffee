@@ -4,10 +4,6 @@ classNames = require 'classnames'
 
 {div, aside, nav, ul, li, span, a, i, button} = React.DOM
 
-RouterActionCreator = require '../actions/router_action_creator'
-LayoutActionCreator  = require '../actions/layout_action_creator'
-AccountActionCreator = require '../actions/account_action_creator'
-
 {Tooltips} = require '../constants/app_constants'
 
 
@@ -44,10 +40,9 @@ module.exports = React.createClass
 
         classesChild = classNames
             target:  @state.target
-            special: @props.icon.type
             news:    @props.recent > 0
 
-        displayError = @props.displayErrors.bind null, @props.progress
+        displayError = @props.displayErrors.bind null, @props.isMailboxLoading
 
         li className: classesParent,
             a
@@ -64,10 +59,10 @@ module.exports = React.createClass
                         className: 'item-label',
                         "#{@props.label}"
 
-                if @props.progress?.get('errors').length
+                if @props.isRefreshError
                     span className: 'refresh-error', onClick: displayError,
                         i className: 'fa fa-warning', null
 
 
-            if not @props.progress and @props.unread
+            if not @props.isMailboxLoading and @props.unread
                 span className: 'badge', @props.unread

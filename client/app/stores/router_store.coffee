@@ -1,9 +1,11 @@
-_         = require 'lodash'
-Immutable = require 'immutable'
+_             = require 'lodash'
+Immutable     = require 'immutable'
+Store         = require '../libs/flux/store/store'
+AppDispatcher = require '../libs/flux/dispatcher/dispatcher'
 
-Store = require '../libs/flux/store/store'
-AccountStore = require '../stores/account_store'
-MessageStore = require '../stores/message_store'
+AccountStore  = require '../stores/account_store'
+MessageStore  = require '../stores/message_store'
+RequestsStore = require '../stores/requests_store'
 
 {AccountActions
 ActionTypes
@@ -43,13 +45,11 @@ class RouterStore extends Store
     _mailboxID = null
     _tab = null
 
-    _refreshMailbox = false
-    _newAccountWaiting = false
-    _newAccountChecking = false
-    _serverAccountErrorByField = Immutable.Map()
-
+    _conversationID = null
     _messageID = null
     _messagesLength = 0
+
+    _timerRouteChange = null
 
 
     getRouter: ->
@@ -66,34 +66,6 @@ class RouterStore extends Store
 
     getModalParams: ->
         _modal
-
-
-    getErrors: ->
-        _serverAccountErrorByField
-
-
-    getRawErrors: ->
-        _serverAccountErrorByField.get 'unknown'
-
-
-    getAlertErrorMessage: ->
-        error = _serverAccountErrorByField.first()
-        if error.name is 'AccountConfigError'
-            return t "config error #{error.field}"
-        else
-            return error.message or error.name or error
-
-
-    isWaiting: ->
-        _newAccountWaiting
-
-
-    isChecking: ->
-        _newAccountChecking
-
-
-    isRefresh: ->
-        _refreshMailbox
 
 
     getURL: (params={}) ->
@@ -131,6 +103,7 @@ class RouterStore extends Store
         params.action ?= @getAction()
         params.mailboxID ?= @getMailboxID()
         params.messageID ?= @getMessageID()
+        params.conversationID ?= @getConversationID()
 
         return @getURL params
 
@@ -200,6 +173,13 @@ class RouterStore extends Store
         _tab = tab
 
 
+    _getFlags = (message) ->
+        flags = if message?
+        then message?.get 'flags'
+        else _currentFilter?.flags
+        flags = [flags] if _.isString flags
+        flags or []
+
 
     getAccount: (accountID) ->
         accountID ?= _accountID
@@ -220,9 +200,10 @@ class RouterStore extends Store
             return _mailboxID
 
 
-    getMailbox: (mailboxID) ->
+    getMailbox: (accountID, mailboxID) ->
+        accountID ?= @getAccountID()
         mailboxID ?= @getMailboxID()
-        @getAllMailboxes()?.get mailboxID
+        AccountStore.getMailbox accountID, mailboxID
 
 
     getAllMailboxes: (accountID) ->
@@ -230,45 +211,55 @@ class RouterStore extends Store
         AccountStore.getAllMailboxes accountID
 
 
-    getInbox: (accountID) ->
-        @getAllMailboxes(accountID)?.find (mailbox) ->
-            'inbox' is mailbox.get('label').toLowerCase()
-
-
-    isInbox: (mailboxID) ->
-        mailboxID ?= _mailboxID
-        mailboxIDs = @getAllMailboxes()?.filter (mailbox) ->
-            'inbox' is mailbox.get('label').toLowerCase()
-        .map (mailbox) -> mailbox.get 'id'
-        .toArray()
-        -1 < mailboxIDs?.indexOf mailboxID
-
-
-    getTrashMailbox: (accountID) ->
-        @getAllMailboxes(accountID)?.find (mailbox) ->
-            'trash' is mailbox.get('label').toLowerCase()
-
-
     getSelectedTab: ->
         _tab
 
 
-    _setCurrentMessage = (messageID) ->
+    _setCurrentMessage = (conversationID, messageID) ->
+        _conversationID = conversationID
         _messageID = messageID
         _messagesLength = 0
 
 
-    getMessageID: ->
-        _messageID
+    getConversationID: (messageID) ->
+        _conversationID
 
 
-    isFlags: (name) ->
-        flags = @getFilter()?.flags or []
-        MessageFilter[name] is flags or MessageFilter[name] in flags
+    getMessageID: (conversationID) ->
+        if conversationID?
+            messages = @getConversation conversationID
+
+            # At first get unread Message
+            # if not get last message
+            message = messages.find @isUnread
+            message ?= messages.shift()
+            message?.get 'id'
+        else
+            _messageID
+
+
+    isUnread: (message) ->
+        flags = _getFlags message
+        if message?
+            return MessageFlags.SEEN not in flags
+        else
+            return MessageFilter.UNSEEN in flags
 
 
     isFlagged: (message) ->
-        MessageFlags.FLAGGED in message?.get 'flags'
+        flags = _getFlags message
+        if message?
+            MessageFlags.FLAGGED in flags
+        else
+            MessageFilter.FLAGGED in flags
+
+
+    isAttached: (message) ->
+        flags = _getFlags message
+        if message?
+            MessageFlags.ATTACH in flags
+        else
+            MessageFilter.ATTACH in flags
 
 
     isDeleted: (message) ->
@@ -290,14 +281,10 @@ class RouterStore extends Store
         draftID in mailboxIDs
 
 
-    isUnread: (message) ->
-        MessageFlags.SEEN not in message?.get 'flags'
-
-
     getMailboxTotal: ->
-        if (@isFlags 'UNSEEN')
+        if @isUnread()
             props = 'nbUnread'
-        else if (@isFlags 'FLAGGED')
+        else if @isFlagged()
             props = 'nbFlagged'
         else
             props = 'nbTotal'
@@ -321,23 +308,21 @@ class RouterStore extends Store
 
     getMessagesList: (mailboxID) ->
         mailboxID ?= @getMailboxID()
-        filter = @getFilter()
 
         # We dont filter for type from and dest because it is
         # complicated by collation and name vs address.
         _filterFlags = (message) =>
-            if filter?.flags
-                flags = message.get 'flags'
-                if @isFlags 'FLAGGED'
-                    return MessageFlags.FLAGGED in flags
-                if @isFlags 'ATTACH'
-                    return message.get('attachments')?.size > 0
-                if @isFlags 'UNSEEN'
-                    return MessageFlags.SEEN not in flags
-            true
+            if @isFlagged()
+                return @isFlagged message
+            if @isAttached()
+                return @isAttached message
+            if @isUnread()
+                return @isUnread message
+            return true
 
         uniq = {}
-        sortOrder = parseInt "#{filter.sort.charAt(0)}1", 10
+        {sort} = @getFilter()
+        sortOrder = parseInt "#{sort.charAt(0)}1", 10
         messages = MessageStore.getAll()?.filter (message) =>
             # Display only last Message of conversation
             conversationID = message.get 'conversationID'
@@ -359,9 +344,8 @@ class RouterStore extends Store
         return messages
 
 
-    getConversation: (messageID) ->
-        messageID ?= @getMessageID()
-        conversationID = MessageStore.getByID(messageID)?.get 'conversationID'
+    getConversation: (conversationID) ->
+        conversationID ?= @getConversationID()
         MessageStore.getConversation conversationID
 
 
@@ -414,36 +398,6 @@ class RouterStore extends Store
         _URI
 
 
-    _clearError = ->
-        _serverAccountErrorByField = Immutable.Map()
-
-
-    _addError = (field, err) ->
-        _serverAccountErrorByField = _serverAccountErrorByField.set field, err
-
-
-    _checkForNoMailbox = (rawAccount) ->
-        unless rawAccount.mailboxes?.length > 0
-            _setError
-                name: 'AccountConfigError',
-                field: 'nomailboxes'
-                causeFields: ['nomailboxes']
-
-
-    _setError = (error) ->
-        if error.name is 'AccountConfigError'
-            clientError =
-                message: t "config error #{error.field}"
-                originalError: error.originalError
-                originalErrorStack: error.originalErrorStack
-            errorsMap = {}
-            errorsMap[field] = clientError for field in error.causeFields
-            _serverAccountErrorByField = Immutable.Map errorsMap
-
-        else
-            _serverAccountErrorByField = Immutable.Map "unknown": error
-
-
     _updateURL = ->
         currentURL = _self.getCurrentURL isServer: false
         if location.hash isnt currentURL
@@ -456,22 +410,15 @@ class RouterStore extends Store
         # but only one is references as real INBOX
         # Get reference INBOX_ID to keep _nextURL works
         # sith this onther INBOX
-        if _self.isInbox()
-            mailboxID = _self.getInbox().get 'id'
+        if AccountStore.isInbox _accountID, _mailboxID
+            mailboxID = AccountStore.getInbox(_accountID).get 'id'
         else
-            mailboxID = _self.getMailboxID()
+            mailboxID = _mailboxID
 
         # Get queryString of URI params
-        filter = _self.getFilter()
-        query = _getURIQueryParams {filter}
+        query = _getURIQueryParams {filter: _currentFilter}
 
         _URI = "#{mailboxID}#{query}"
-
-
-    _gotoAccountMailbox = (account) ->
-        _newAccountWaiting = false
-        _checkForNoMailbox account
-        _action = MessageActions.SHOW_ALL
 
 
     ###
@@ -480,8 +427,13 @@ class RouterStore extends Store
     __bindHandlers: (handle) ->
 
         handle ActionTypes.ROUTE_CHANGE, (payload={}) ->
+            # Ensure all stores that listen ROUTE_CHANGE have vanished
+            AppDispatcher.waitFor [RequestsStore.dispatchToken]
+
+            clearTimeout _timerRouteChange
+
             {accountID, mailboxID, tab} = payload
-            {action, messageID, query} = payload
+            {action, conversationID, messageID, query} = payload
 
             # We cant display any informations
             # without accounts
@@ -496,7 +448,7 @@ class RouterStore extends Store
 
             # From MessageStore
             # Update currentMessageID
-            _setCurrentMessage messageID
+            _setCurrentMessage conversationID, messageID
 
             # Handle all Selection
             # _resetSelection()
@@ -529,64 +481,21 @@ class RouterStore extends Store
             @emit 'change'
 
 
-        handle ActionTypes.ADD_ACCOUNT_REQUEST, ({value}) ->
-            _newAccountWaiting = true
-            @emit 'change'
-
-
         handle ActionTypes.ADD_ACCOUNT_SUCCESS, ({account}) ->
-            setTimeout =>
-                _gotoAccountMailbox account
+            _timerRouteChange = setTimeout =>
+                # _newAccountWaiting = false
+                _action            = MessageActions.SHOW_ALL
+
+                _setCurrentAccount account.id, account.inboxMailbox
+                _updateURL()
+
                 @emit 'change'
             , 5000
 
 
-        handle ActionTypes.ADD_ACCOUNT_FAILURE, ({error}) ->
-            _newAccountWaiting = false
-            _setError error
-            @emit 'change'
-
-
-        handle ActionTypes.CHECK_ACCOUNT_REQUEST, () ->
-            _newAccountChecking = true
-            @emit 'change'
-
-
-        handle ActionTypes.CHECK_ACCOUNT_SUCCESS, () ->
-            _newAccountChecking = false
-            @emit 'change'
-
-
-        handle ActionTypes.CHECK_ACCOUNT_FAILURE, ({error}) ->
-            _newAccountChecking = false
-            _setError error
-            @emit 'change'
-
-
-        handle ActionTypes.EDIT_ACCOUNT_REQUEST, ({value}) ->
-            _newAccountWaiting = true
-            @emit 'change'
-
-
-        handle ActionTypes.EDIT_ACCOUNT_SUCCESS, ({rawAccount}) ->
-            _newAccountWaiting = false
-            _checkForNoMailbox rawAccount
-            _clearError()
-            @emit 'change'
-
-
-        handle ActionTypes.EDIT_ACCOUNT_FAILURE, ({error}) ->
-            _newAccountWaiting = false
-            _setError error
-            @emit 'change'
-
-
-        handle ActionTypes.MESSAGE_FETCH_SUCCESS, (payload) ->
-            {result, timestamp, lastPage} = payload
-
+        handle ActionTypes.MESSAGE_FETCH_SUCCESS, ({lastPage}) ->
             # Save last message references
             _lastPage[_URI] = lastPage if lastPage?
-
             @emit 'change'
 
 
@@ -601,26 +510,13 @@ class RouterStore extends Store
 
         handle ActionTypes.MESSAGE_TRASH_SUCCESS, ({target, updated, ref}) ->
             # Update messageID
-            messageID = @getNextConversation()?.get 'id'
-            _setCurrentMessage messageID
+            message = @getNextConversation()
+            conversationID = message?.get 'conversationID'
+            messageID = message?.get 'id'
+            _setCurrentMessage conversationID, messageID
 
             # Update URL if it didnt
             _updateURL()
-            @emit 'change'
-
-
-        handle ActionTypes.REFRESH_REQUEST, ->
-            _refreshMailbox = true
-            @emit 'change'
-
-
-        handle ActionTypes.REFRESH_SUCCESS, ->
-            _refreshMailbox = false
-            @emit 'change'
-
-
-        handle ActionTypes.REFRESH_FAILURE, ->
-            _refreshMailbox = false
             @emit 'change'
 
 

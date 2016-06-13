@@ -13,9 +13,9 @@ RouterActionCreator = require '../actions/router_action_creator'
 
 
 _getFullConversation = ->
-    {conversationID, conversation} = @props
+    {conversationID, messages} = @props
     length = RouterGetter.getConversationLength {conversationID}
-    if length and length isnt conversation?.length
+    if length and length isnt messages?.length
         setTimeout ->
             RouterActionCreator.getConversation conversationID
         , 0
@@ -51,8 +51,6 @@ module.exports = React.createClass
 
     componentDidUpdate: ->
         _getFullConversation.call @
-        _freezeHeader.call @
-        _scrollToActive.call @
 
 
     renderMessage: (message) ->
@@ -66,7 +64,7 @@ module.exports = React.createClass
 
 
     render: ->
-        unless @props.conversation?.length
+        unless @props.messages?.length
             return section
                 key: 'conversation'
                 className: 'conversation panel'
@@ -89,7 +87,7 @@ module.exports = React.createClass
             section
                 key: "conversation-#{@props.messageID}-content"
                 ref: 'conversation-content',
-                    @props.conversation.map @renderMessage
+                    @props.messages.map @renderMessage
 
 
     closeConversation: ->

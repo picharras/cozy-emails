@@ -37,9 +37,12 @@ module.exports = MailboxRefresh = (function(superClass) {
 
   MailboxRefresh.prototype.initialize = function(options, callback) {
     var account, fastSupport, mailbox;
+    if (options == null) {
+      options = {};
+    }
     this.mailbox = mailbox = options.mailbox;
-    account = ramStore.getAccount(mailbox.accountID);
     this.shouldNotif = false;
+    account = ramStore.getAccount(mailbox.accountID);
     if (!account) {
       return callback(null);
     }

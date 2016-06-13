@@ -31,41 +31,25 @@ module.exports = React.createClass
     displayName: 'MessageList'
 
 
-    getInitialState: ->
-        displayProgress = true
-        {displayProgress}
-
-
-    componentWillReceiveProps: ->
-        displayProgress = RouterGetter.isMailboxLoading()
-        if displayProgress isnt @state?.displayProgress
-            @setState {displayProgress}
-
-
     componentDidMount: ->
         _scrollToActive.call @
 
 
-    componentDidUpdate: ->
-        _scrollToActive.call @
-
-
     render: ->
-        unless @props.isMailbox
-            return div className: 'mailbox-loading',
-                Spinner color: 'blue'
-                strong null, t 'emails are fetching'
-                p null, t 'thanks for patience'
-
-
         section
             'key'               : "messages-list-#{@props.mailboxID}"
             'ref'               : "messages-list"
             'data-mailbox-id'   : @props.mailboxID
             'className'         : 'messages-list panel'
 
+            unless @props.isMailbox
+                div className: 'mailbox-loading',
+                    Spinner color: 'blue'
+                    strong null, t 'emails are fetching'
+                    p null, t 'thanks for patience'
+
             # Progress Bar of mailbox refresh
-            if @state?.displayProgress
+            if @props.isLoading
                 Progress
                     value: 0
                     max: 1
@@ -98,16 +82,13 @@ module.exports = React.createClass
     renderItem: (message) ->
         messageID = message.get 'id'
         conversationID = message.get 'conversationID'
-        isSelected = -1 < @props.selection?.indexOf messageID
         conversationLengths = RouterGetter.getConversationLength {conversationID}
         isActive = RouterGetter.isCurrentConversation conversationID
         MessageItem
             key                 : "messageItem-#{messageID}"
+            messageID           : messageID
+            flags               : message.get 'flags'
             message             : message
-            tags                : RouterGetter.getTags message
             conversationLengths : conversationLengths
-            isSelected          : isSelected
             isActive            : isActive
             login               : RouterGetter.getLogin()
-            mailboxID           : @props.mailboxID
-            displayConversations: @props.displayConversations

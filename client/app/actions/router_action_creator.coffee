@@ -2,7 +2,8 @@ _ = require 'lodash'
 
 AppDispatcher = require '../libs/flux/dispatcher/dispatcher'
 
-RouterStore = require '../stores/router_store'
+RouterStore     = require '../stores/router_store'
+RequestsStore   = require '../stores/requests_store'
 
 Notification = require '../libs/notification'
 
@@ -19,21 +20,23 @@ RouterActionCreator =
     # This is a read data pattern
     # ActionCreator is a write data pattern
     refreshMailbox: ({mailboxID, deep}) ->
+        return unless (mailboxID ?= RouterStore.getMailboxID())
         deep ?= true
+        silent = true
 
         AppDispatcher.dispatch
             type: ActionTypes.REFRESH_REQUEST
-            value: {mailboxID, deep}
+            value: {mailboxID, deep, silent}
 
-        XHRUtils.refreshMailbox mailboxID, {deep}, (error, updated) ->
+        XHRUtils.refreshMailbox mailboxID, {deep, silent}, (error, updated) ->
             if error?
                 AppDispatcher.dispatch
                     type: ActionTypes.REFRESH_FAILURE
-                    value: {mailboxID, error, deep}
+                    value: {mailboxID, error}
             else
                 AppDispatcher.dispatch
                     type: ActionTypes.REFRESH_SUCCESS
-                    value: {mailboxID, updated, deep}
+                    value: {mailboxID, updated}
 
 
     gotoCurrentPage: (params={}) ->
@@ -93,56 +96,73 @@ RouterActionCreator =
 
 
     gotoNextPage: ->
-        if (url = _getNextURL())?
+        if not RequestsStore.isRefreshing() and (url = _getNextURL())?
             @gotoCurrentPage {url}
 
 
     gotoCompose: (params={}) ->
         {messageID, mailboxID} = params
+
         action = MessageActions.NEW
-        mailboxID ?= RouterStore.getMailboxID()
+        mailboxID ?= RouterStore.getMailboxID messageID
+
         AppDispatcher.dispatch
             type: ActionTypes.ROUTE_CHANGE
             value: {mailboxID, messageID, action}
 
 
+    # Get last message unread
+    # or get last message if not
+    gotoConversation: (params={}) ->
+        {conversationID} = params
+        messageID = RouterStore.getMessageID conversationID
+        @gotoMessage {conversationID, messageID}
+
+
     gotoMessage: (params={}) ->
-        {messageID, mailboxID, action} = params
+        {conversationID, messageID, mailboxID, query} = params
+
         messageID ?= RouterStore.getMessageID()
+        conversationID ?= RouterStore.getConversationID()
         mailboxID ?= RouterStore.getMailboxID()
-        action ?= MessageActions.SHOW
+        query ?= RouterStore.getFilter()
+        action = MessageActions.SHOW
 
         AppDispatcher.dispatch
             type: ActionTypes.ROUTE_CHANGE
-            value: {messageID, mailboxID, action}
+            value: {conversationID, messageID, mailboxID, action, query}
 
 
     gotoPreviousMessage: ->
         message = RouterStore.gotoPreviousMessage()
+        conversationID = message?.get 'conversationID'
         messageID = message?.get 'id'
         mailboxID = message?.get 'mailboxID'
-        @gotoMessage {messageID, mailboxID}
+        @gotoMessage {conversationID, messageID, mailboxID}
 
 
     gotoNextMessage: ->
         message = RouterStore.gotoNextMessage()
+        conversationID = message?.get 'conversationID'
         messageID = message?.get 'id'
         mailboxID = message?.get 'mailboxID'
-        @gotoMessage {messageID, mailboxID}
+        @gotoMessage {conversationID, messageID, mailboxID}
 
 
     gotoPreviousConversation: ->
         message = RouterStore.getNextConversation()
+        conversationID = message?.get 'conversationID'
         messageID = message?.get 'id'
         mailboxID = message?.get 'mailboxID'
-        @gotoMessage {messageID, mailboxID}
+        @gotoMessage {conversationID, messageID, mailboxID}
 
 
     gotoNextConversation: ->
         message = RouterStore.getNextConversation()
+        conversationID = message?.get 'conversationID'
         messageID = message?.get 'id'
         mailboxID = message?.get 'mailboxID'
-        @gotoMessage {messageID, mailboxID}
+        @gotoMessage {conversationID, messageID, mailboxID}
 
 
     closeConversation: (params={}) ->
@@ -325,10 +345,9 @@ _setNextURL = ({pageAfter}) ->
         action = MessageActions.SHOW_ALL
         filter = {pageAfter}
 
-        value = RouterStore.getCurrentURL {filter, action}
-        previousValue = _getPreviousURL()
-        if not previousValue? or previousValue isnt value
-            _nextURL[key] = value
+        currentURL = RouterStore.getCurrentURL {filter, action}
+        if _getPreviousURL() isnt currentURL
+            _nextURL[key] = currentURL
 
 
 module.exports = RouterActionCreator

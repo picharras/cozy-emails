@@ -14,6 +14,9 @@ ref = require('../utils/errors'), BadRequest = ref.BadRequest, NotFound = ref.No
 ContactActivity = {
   search: function(data, callback) {
     var params, request;
+    if (data == null) {
+      data = {};
+    }
     if (data.query != null) {
       request = 'mailByName';
       params = {
@@ -28,6 +31,9 @@ ContactActivity = {
   },
   create: function(data, callback) {
     var ref1;
+    if (data == null) {
+      data = {};
+    }
     if (((ref1 = data.contact) != null ? ref1.address : void 0) != null) {
       return Contact.createNoDuplicate(data.contact, callback);
     } else {
@@ -48,8 +54,21 @@ ContactActivity = {
 };
 
 module.exports.create = function(req, res, next) {
-  var activity, ref1, ref2;
+  var activity, msg, ref1, stack;
+  if (req == null) {
+    req = {};
+  }
+  if (res == null) {
+    res = {};
+  }
   activity = req.body;
+  if (activity == null) {
+    activity = {
+      data: {
+        type: 'error'
+      }
+    };
+  }
   switch (activity.data.type) {
     case 'contact':
       if (ContactActivity[activity.name] != null) {
@@ -73,11 +92,15 @@ module.exports.create = function(req, res, next) {
       }
       break;
     case 'error':
-      if ((ref1 = activity.data.error) != null ? ref1.stack : void 0) {
+      if ((stack = (ref1 = activity.data.error) != null ? ref1.stack : void 0)) {
         log.error(activity.data);
-        log.error((ref2 = activity.data.error) != null ? ref2.stack : void 0);
+        log.error(stack);
       } else {
-        log.error(JSON.parse(activity.data.error.msg));
+        msg = activity.data.error.msg;
+        if (msg == null) {
+          msg = "Missing req argument";
+        }
+        log.error(msg);
       }
       return res.send('ok');
     case 'warn':

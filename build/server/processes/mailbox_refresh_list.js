@@ -33,6 +33,9 @@ module.exports = MailboxRefreshList = (function(superClass) {
   MailboxRefreshList.prototype.code = 'mailbox-refresh-list';
 
   MailboxRefreshList.prototype.initialize = function(options, callback) {
+    if (options == null) {
+      options = {};
+    }
     this.account = options.account;
     return async.series([this.diffBoxesList, this.createNewBoxes, this.destroyOldBoxes], callback);
   };

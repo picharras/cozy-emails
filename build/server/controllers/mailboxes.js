@@ -24,19 +24,19 @@ ramStore = require('../models/store_account_and_boxes');
 Scheduler = require('../processes/_scheduler');
 
 module.exports.refresh = function(req, res, next) {
-  var account, deepRefresh, mailbox;
-  mailbox = ramStore.getMailbox(req.params.mailboxID);
-  deepRefresh = req.query.deep;
-  if (!mailbox) {
+  var account, mailbox, ref1;
+  if (req == null) {
+    req = {};
+  }
+  if (!(mailbox = ramStore.getMailbox((ref1 = req.params) != null ? ref1.mailboxID : void 0))) {
     return next(new NotFound("Mailbox " + req.params.mailboxID));
   }
-  account = ramStore.getAccount(mailbox.accountID);
-  if (!account) {
+  if (!(account = ramStore.getAccount(mailbox.accountID))) {
     return next(new NotFound("Account " + mailbox.accountID));
   } else if (!account.supportRFC4551) {
     return next(new BadRequest('Cant refresh a non RFC4551 box'));
   } else {
-    return Scheduler.refreshNow(mailbox, deepRefresh, function(err) {
+    return Scheduler.refreshNow(mailbox, req.query, function(err) {
       if (err) {
         return next(err);
       }

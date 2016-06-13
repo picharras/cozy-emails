@@ -22,19 +22,6 @@ log = require('../utils/logging')({
 ramStore = require('../models/store_account_and_boxes');
 
 module.exports.main = function(req, res, next) {
-  var tryAgain;
-  if (Scheduler.applicationStartupRunning()) {
-    if (req.hasWaitedForStart) {
-      res.render('reindexing');
-    } else {
-      req.hasWaitedForStart = true;
-      tryAgain = function() {
-        return module.exports.main(req, res, next);
-      };
-      setTimeout(tryAgain, 2000);
-    }
-    return null;
-  }
   return async.series([
     function(cb) {
       return Settings.getDefault(cb);
