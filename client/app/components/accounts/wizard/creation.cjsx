@@ -113,6 +113,7 @@ module.exports = AccountWizardCreation = React.createClass
                             </button> if @props.hasDefaultAccount and not @state.success}
                             {<button type="submit"
                                      form="account-wizard-creation"
+                                     aria-busy={@state.isBusy}
                                      disabled={not @state.enableSubmit}>
                                 {t('account wizard creation save')}
                             </button> unless @state.success}
@@ -179,5 +180,4 @@ module.exports = AccountWizardCreation = React.createClass
             @setState source
         else
             {target: {value}} = event
-            nextState = _.partial AccountsUtils.validateState, source, value
-            @setState nextState
+            @setState _.partial AccountsUtils.validateState, source, value

@@ -32,7 +32,9 @@ class AccountStore extends Store
             # TODO: should be done server side
             _.forEach MailboxSpecial, (type, value) ->
                 unless account[value]?
-                    if MailboxFlags[type] is mailbox.attribs.join(',')
+                    if mailbox.attribs? and \
+                    mailbox.attribs.length > 0 \
+                    and MailboxFlags[type] is mailbox.attribs.join(',')
                         account[value] = mailbox.id
 
                     # Gmail Inbox has /noselect attribs
@@ -191,10 +193,9 @@ class AccountStore extends Store
 
 
     getDefault: (mailboxID) ->
-        if mailboxID
-            return @getByMailbox mailboxID
-        else
-            return @getAll().first()
+        account = @getByMailbox mailboxID if mailboxID
+        account ?= @getAll().first()
+        account
 
 
     getByMailbox: (mailboxID) ->
@@ -221,12 +222,13 @@ class AccountStore extends Store
         mailbox = @getMailbox accountID, mailboxID
         return unless mailbox?.size
 
-        mailboxTree = mailbox.get('tree')
-        mailboxRoot = mailboxTree[0].toLowerCase()
+        tree = mailbox.get('tree')
+        tree = unless getChildren then tree.join('/') else tree[0]
+        root = tree.toLowerCase()
 
-        isInbox = 'inbox' is mailboxRoot
-        isInboxChild = unless getChildren then mailboxTree.length is 1 else true
-        isGmailInbox = '[gmail]' is mailboxRoot and isInboxChild
+        isInbox = 'inbox' is root
+        isInboxChild = unless getChildren then tree.length is 1 else true
+        isGmailInbox = '[gmail]' is root and isInboxChild
 
         return isInbox or isGmailInbox
 
@@ -236,9 +238,10 @@ class AccountStore extends Store
             @isInbox accountID, mailbox.get 'id'
 
 
-    getTrashMailbox: (accountID) ->
-        @getAllMailboxes(accountID)?.find (mailbox) ->
-            'trash' is mailbox.get('label').toLowerCase()
+    isTrashbox: (accountID, mailboxID) ->
+        trashboxID = @getByID(accountID)?.get 'trashMailbox'
+        trashboxID is mailboxID
+
 
     getAllMailbox: (accountID) ->
         @getAllMailboxes(accountID)?.find (mailbox) ->
@@ -267,3 +270,4 @@ class AccountStore extends Store
 
 
 module.exports = new AccountStore()
+
